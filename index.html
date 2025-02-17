@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>Neon Tetris (White Background, No Flicker)</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      /* 배경색 흰색으로 변경 */
+      background: #fff; 
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      color: #000; /* 텍스트는 검정색으로 */
+    }
+    canvas {
+      /* 테두리를 눈에 잘 띄게 검정색으로 */
+      border: 2px solid #000; 
+      image-rendering: pixelated; /* 픽셀 느낌 */
+    }
+    /* 깜빡이는 효과 제거. 필요 없는 경우 주석 처리하거나 지워도 됩니다. */
+    /*
+    .neon-text {
+      font-size: 1.2rem;
+      text-shadow:
+        0 0 5px #fff,
+        0 0 10px #fff,
+        0 0 20px #ff00de,
+        0 0 30px #ff00de,
+        0 0 40px #ff00de,
+        0 0 70px #ff00de,
+        0 0 80px #ff00de,
+        0 0 100px #ff00de;
+      // animation: neon-flicker 1.5s infinite alternate;
+    }
+    @keyframes neon-flicker {
+      0% {
+        opacity: 1;
+      }
+      50% {
+        opacity: 0.5;
+      }
+      100% {
+        opacity: 1;
+      }
+    }
+    */
+  </style>
+</head>
+<body>
+  <canvas id="tetris" width="240" height="400"></canvas>
+  <script>
+    const canvas = document.getElementById('tetris');
+    const context = canvas.getContext('2d');
+
+    // 픽셀 크게 보이도록 확대
+    context.scale(20, 20);
+
+    // 네온 색상 목록 (깜빡임이 없도록 알파값 대신 정적 RGB 사용)
+    const neonColors = [
+      '255, 0, 255',   // 핑크
+      '0, 255, 255',   // 시안
+      '255, 255, 0',   // 노랑
+      '255, 0, 0',     // 빨강
+      '0, 255, 0',     // 초록
+      '0, 0, 255',     // 파랑
+      '255, 128, 0',   // 주황
+    ];
+
+    // 테트리스 도형 생성
+    function createPiece(type) {
+      switch(type){
+        case 'T':
+          return [
+            [0, 1, 0],
+            [1, 1, 1],
+            [0, 0, 0],
+          ];
+        case 'O':
+          return [
+            [2, 2],
+            [2, 2],
+          ];
+        case 'L':
+          return [
+            [3, 0, 0],
+            [3, 0, 0],
+            [3, 3, 0],
+          ];
+        case 'J':
+          return [
+            [0, 4, 0],
+            [0, 4, 0],
+            [4, 4, 0],
+          ];
+        case 'I':
+          return [
+            [5, 5, 5, 5],
+          ];
+        case 'S':
+          return [
+            [0, 6, 6],
+            [6, 6, 0],
+            [0, 0, 0],
+          ];
+        case 'Z':
+          return [
+            [7, 7, 0],
+            [0, 7, 7],
+            [0, 0, 0],
+          ];
+      }
+    }
+
+    // 배경(필드) 생성
+    const arena = createMatrix(12, 20);
+    function createMatrix(w, h) {
+      const matrix = [];
+      while (h--) {
+        matrix.push(new Array(w).fill(0));
+      }
+      return matrix;
+    }
+
+    // 블록과 필드 충돌 검사
+    function collide(arena, player) {
+      const [m, o] = [player.matrix, player.pos];
+      for (let y = 0; y < m.length; ++y) {
+        for (let x = 0; x < m[y].length; ++x) {
+          if (
+            m[y][x] !== 0 &&
+            (arena[y + o.y] && arena[y + o.y][x + o.x]) !== 0
+          ) {
+            return true;
+          }
+        }
+      }
+      return false;
+    }
+
+    // 블록을 필드에 합침
+    function merge(arena, player) {
+      player.matrix.forEach((row, y) => {
+        row.forEach((value, x) => {
+          if (value !== 0) {
+            arena[y + player.pos.y][x + player.pos.x] = value;
+          }
+        });
+      });
+    }
+
+    // 한 줄이 전부 차면 제거
+    function arenaSweep() {
+      let rowCount = 1;
+      outer: for (let y = arena.length - 1; y > 0; --y) {
+        for (let x = 0; x < arena[y].length; ++x) {
+          if (arena[y][x] === 0) {
+            continue outer;
+          }
+        }
+        const row = arena.splice(y, 1)[0].fill(0);
+        arena.unshift(row);
+        ++y;
+        rowCount *= 2;
+      }
+    }
+
+    // 블록 좌우 이동
+    function playerMove(dir) {
+      player.pos.x += dir;
+      if (collide(arena, player)) {
+        player.pos.x -= dir;
+      }
+    }
+
+    // 블록 회전 로직
+    function rotate(matrix, dir) {
+      for (let y = 0; y < matrix.length; ++y) {
+        for (let x = 0; x < y; ++x) {
+          [matrix[x][y], matrix[y][x]] = [matrix[y][x], matrix[x][y]];
+        }
+      }
+      if (dir > 0) {
+        matrix.forEach(row => row.reverse());
+      } else {
+        matrix.reverse();
+      }
+    }
+
+    // 플레이어의 블록 회전
+    function playerRotate(dir) {
+      const pos = player.pos.x;
+      let offset = 1;
+      rotate(player.matrix, dir);
+      while (collide(arena, player)) {
+        player.pos.x += offset;
+        offset = -(offset + (offset > 0 ? 1 : -1));
+        if (offset > player.matrix[0].length) {
+          // 회전 불가능하면 복구
+          rotate(player.matrix, -dir);
+          player.pos.x = pos;
+          return;
+        }
+      }
+    }
+
+    // 블록 1칸씩 낙하
+    function playerDrop() {
+      player.pos.y++;
+      if (collide(arena, player)) {
+        player.pos.y--;
+        merge(arena, player);
+        playerReset();
+        arenaSweep();
+      }
+      dropCounter = 0;
+    }
+
+    // 스페이스바로 하드 드롭 (즉시 바닥으로)
+    function playerHardDrop() {
+      while(!collide(arena, player)) {
+        player.pos.y++;
+      }
+      // 충돌했으므로 한 칸 위로 복구
+      player.pos.y--;
+      merge(arena, player);
+      playerReset();
+      arenaSweep();
+      dropCounter = 0;
+    }
+
+    // 새 블록 생성
+    function playerReset() {
+      const pieces = 'TJLOSZI';
+      player.matrix = createPiece(pieces[(pieces.length * Math.random()) | 0]);
+      player.pos.y = 0;
+      player.pos.x =
+        ((arena[0].length / 2) | 0) -
+        ((player.matrix[0].length / 2) | 0);
+
+      // 새 블록이 생성되자마자 충돌하면 필드 리셋
+      if (collide(arena, player)) {
+        arena.forEach(row => row.fill(0));
+      }
+    }
+
+    // 캔버스에 그리기
+    function drawMatrix(matrix, offset) {
+      for (let y = 0; y < matrix.length; ++y) {
+        for (let x = 0; x < matrix[y].length; ++x) {
+          const value = matrix[y][x];
+          if (value !== 0) {
+            // 깜빡임 제거: 정적 RGB 색상 사용
+            const color = `rgb(${neonColors[value - 1]})`;
+            context.fillStyle = color;
+            context.fillRect(x + offset.x, y + offset.y, 1, 1);
+          }
+        }
+      }
+    }
+
+    function draw() {
+      // 화면 지우기 (배경 흰색이므로 전체 지우기)
+      context.clearRect(0, 0, canvas.width, canvas.height);
+
+      drawMatrix(arena, { x: 0, y: 0 });
+      drawMatrix(player.matrix, player.pos);
+    }
+
+    let dropCounter = 0;
+    let dropInterval = 1000; // 1초 간격 자동 낙하
+
+    let lastTime = 0;
+    function update(time = 0) {
+      const deltaTime = time - lastTime;
+      lastTime = time;
+
+      dropCounter += deltaTime;
+      if (dropCounter > dropInterval) {
+        playerDrop();
+      }
+
+      draw();
+      requestAnimationFrame(update);
+    }
+
+    // 플레이어 정보
+    const player = {
+      pos: { x: 0, y: 0 },
+      matrix: null,
+    };
+
+    // 키보드 이벤트
+    document.addEventListener('keydown', event => {
+      switch (event.key) {
+        case 'ArrowLeft':
+          playerMove(-1);
+          break;
+        case 'ArrowRight':
+          playerMove(1);
+          break;
+        case 'ArrowDown':
+          // 소프트 드롭
+          playerDrop();
+          break;
+        case 'ArrowUp':
+          // 위쪽 화살표로 블록 회전 (시계방향)
+          playerRotate(1);
+          break;
+        case ' ':
+          // 스페이스바로 하드 드롭
+          event.preventDefault(); 
+          playerHardDrop();
+          break;
+      }
+    });
+
+    // 초기 실행
+    playerReset();
+    update();
+  </script>
+</body>
+</html>
